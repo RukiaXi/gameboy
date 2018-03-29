@@ -1,0 +1,31 @@
+body {
+    background-image: url("./../images/background.jpg");
+    background-position: center;
+}
+
+.gameboy {
+    height: 800px;
+    background-size: contain;
+    background-image: url(./../images/gameboy.png);
+    width: 487px;
+}
+
+.gameboy #emulator {
+    position: relative;
+    margin-top: 109px;
+    margin-right: 1px;
+    height: 228px;
+    width: 248px;
+}
+
+.gameboy #emulator > canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.instructions {
+    top: 25px;
+    width: 20rem;
+    right: 25px;
+    height: auto;
+}
