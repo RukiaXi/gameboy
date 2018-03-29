@@ -22,12 +22,12 @@ if (process.env.APP_ENV !== "browser") {
     global = window;
     global.cpu = cpu;
 
-    document.addEventListener("keyup", (e) => {
-        switch (e.key) {
+    global.releaseKey = (key) => {
+        switch (key) {
             case "z":
                 cpu.keyReleased(Key.A);
                 break;
-            
+
             case "x":
                 cpu.keyReleased(Key.B);
                 break;
@@ -56,10 +56,10 @@ if (process.env.APP_ENV !== "browser") {
                 cpu.keyReleased(Key.Right);
                 break;
         }
-    });
+    };
 
-    document.addEventListener("keydown", (e) => {
-        switch (e.key) {
+    global.pressKey = (key) => {
+        switch (key) {
             case "z":
                 cpu.keyPressed(Key.A);
                 break;
@@ -92,6 +92,14 @@ if (process.env.APP_ENV !== "browser") {
                 cpu.keyPressed(Key.Right);
                 break;
         }
+    };
+
+    document.addEventListener("keyup", (e) => {
+        global.releaseKey(e.key);
+    });
+
+    document.addEventListener("keydown", (e) => {
+        global.pressKey(e.key);
     });
 }
 
