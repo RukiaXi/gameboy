@@ -8,6 +8,7 @@ body {
     background-size: contain;
     background-image: url(./../images/gameboy.png);
     width: 487px;
+    background-repeat: no-repeat;
 }
 
 .gameboy #emulator {
@@ -28,4 +29,127 @@ body {
     width: 20rem;
     right: 25px;
     height: auto;
+}
+
+.button {
+    position: absolute;
+    width: 68px;
+    height: 68px;
+    cursor: pointer;
+}
+
+.button.b {
+    right: -5px;
+    top: 407px;
+}
+
+.button.a {
+    right: -83px;
+    top: 372px;
+}
+
+.button.up {
+    top: 370px;
+    left: -40px;
+    height: 42px;
+    width: 46px;
+}
+
+.button.down {
+    top: 450px;
+    left: -40px;
+    height: 42px;
+    width: 46px;
+}
+
+.button.left {
+    top: 408px;
+    left: -77px;
+    height: 44px;
+    width: 40px;
+}
+
+.button.right {
+    top: 408px;
+    left: 3px;
+    height: 44px;
+    width: 40px;
+}
+
+.button.start {
+    top: 512px;
+    left: 103px;
+}
+
+.button.select {
+    top: 512px;
+    left: 23px;
+}
+
+// Small devices (landscape phones, 576px and up)
+@media (max-width: 575px) {
+    .gameboy {
+        height: 526px;
+        width: 320px;
+    }
+
+    .gameboy #emulator {
+        margin-top: 71px;
+        margin-right: 1px;
+        height: 150px;
+        width: 165px;
+    }
+
+    .button {
+        width: 44px;
+        height: 44px;
+    }
+
+    .button.a {
+        right: -54px;
+        top: 245px;
+    }
+
+    .button.b {
+        right: -2px;
+        top: 269px;
+    }
+    
+    .button.up {
+        top: 243px;
+        left: -26px;
+        height: 26px;
+        width: 31px;
+    }
+    
+    .button.down {
+        top: 296px;
+        left: -26px;
+        height: 26px;
+        width: 32px;
+    }
+
+    .button.left {
+        top: 268px;
+        left: -50px;
+        height: 30px;
+        width: 26px;
+    }
+
+    .button.right {
+        top: 268px;
+        left: 4px;
+        height: 30px;
+        width: 26px;
+    }
+
+    .button.start {
+        top: 337px;
+        left: 70px;
+    }
+
+    .button.select {
+        top: 337px;
+        left: 17px;
+    }
 }

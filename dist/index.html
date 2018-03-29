@@ -2,17 +2,29 @@
 <html>
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=320, initial-scale=1, maximum-scale=1, user-scalable=0"/> <!--320-->
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
         <link rel="stylesheet" href="assets/css/style.css">
     </head>
     <body>
         <div class="d-flex container-fluid justify-content-center">
             <div class="gameboy d-flex justify-content-center">
-                <div id="emulator"></div>
+                <div id="emulator">
+                    <div class="button a"></div>
+                    <div class="button b"></div>
+
+                    <div class="button up"></div>
+                    <div class="button right"></div>
+                    <div class="button down"></div>
+                    <div class="button left"></div>
+
+                    <div class="button start"></div>
+                    <div class="button select"></div>
+                </div>
             </div>
         </div>
 
-        <div class="instructions card position-absolute" style="width: 18rem;">
+        <div class="instructions card position-absolute d-none d-xs-block" style="width: 18rem;">
             <div class="card-body">
                 <h5 class="card-title">Instructions</h5>
                 <p class="card-text">
@@ -30,5 +42,58 @@
         <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
         <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
         <script type="text/javascript" src="scripts/main.js" defer></script>
+        <script>
+            function simulateKeyPress(character) {
+                jQuery.event.trigger({ type : 'keypress', which : character.charCodeAt(0) });
+            }
+
+            $(".button.a").on("mousedown touchstart", function (e) {
+                window.pressKey("z");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("z");
+            });
+
+            $(".button.b").on("mousedown touchstart", function (e) {
+                window.pressKey("x");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("x");
+            });
+
+            $(".button.up").on("mousedown touchstart", function (e) {
+                window.pressKey("ArrowUp");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("ArrowUp");
+            });
+
+            $(".button.down").on("mousedown touchstart", function (e) {
+                window.pressKey("ArrowDown");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("ArrowDown");
+            });
+
+            $(".button.left").on("mousedown touchstart", function (e) {
+                window.pressKey("ArrowLeft");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("ArrowLeft");
+            });
+
+            $(".button.right").on("mousedown touchstart", function (e) {
+                window.pressKey("ArrowRight");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("ArrowRight");
+            });
+
+            $(".button.start").on("mousedown touchstart", function (e) {
+                window.pressKey("c");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("c");
+            });
+
+            $(".button.select").on("mousedown touchstart", function (e) {
+                window.pressKey("v");
+            }).on("mouseup touchend", function (e) {
+                window.releaseKey("v");
+            });
+        </script>
     </body>
 </html>
