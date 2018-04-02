@@ -23,14 +23,19 @@ export class Memory
 
     private _bios: number[];
     public _rom: number[];
-    private _biosEnabled: Boolean;
+    private _biosEnabled: boolean;
 
-    private _vram: number[];
+    private _vram: number[][];
     private _hram: number[];
-    private _wram: number[];
+    private _wram: number[][];
     private _oamram: number[];
     private _ram: number[];
     private _type: RomType;
+    private _wramBank: number;
+    private _vramBank: number;
+
+    public static save: (memory: Memory, identifier: string, data: string) => void;
+    public static load: (memory: Memory, identifier: string) => string;
 
     constructor(cpu: CPU)
     {
@@ -39,14 +44,45 @@ export class Memory
         this._bios = null;
         this._rom = null;
         this._biosEnabled = true;
-        this._wram = Array(0x2000).fill(0xFF);
-        this._vram = Array(0x2000).fill(0xFF);
+        this._wram = [
+            Array(0x1000).fill(0xFF),
+            Array(0x1000).fill(0xFF),
+            Array(0x1000).fill(0xFF),
+            Array(0x1000).fill(0xFF),
+            Array(0x1000).fill(0xFF),
+            Array(0x1000).fill(0xFF),
+            Array(0x1000).fill(0xFF),
+            Array(0x1000).fill(0xFF)
+        ];
+        this._vram = [
+            Array(0x2000).fill(0xFF),
+            Array(0x2000).fill(0xFF)
+        ];
         this._hram = Array(127).fill(0xFF);
         this._oamram = Array(0xA0).fill(0xFF);
         this._ram = Array(0x8000).fill(0xFF);
+        this._wramBank = 1;
+        this._vramBank = 0;
 
         this.addRegister(0xFF50, () => 0, (x) => {
-            this._biosEnabled = x !== 1;
+            this._biosEnabled = false;
+            this._cpu._inBootstrap = false;
+        });
+
+        this.addRegister(0xFF70, () => {
+            return 0x40 | (this._wramBank & 0x07);
+        }, (x) => {
+            this._wramBank = x & 0x07;
+
+            if (this._wramBank === 0) {
+                this._wramBank = 1;
+            }
+        });
+
+        this.addRegister(0xFF4F, () => {
+            return this._vramBank & 0x01;
+        }, (x) => {
+            this._vramBank = x & 0x01;
         });
     }
 
@@ -66,7 +102,6 @@ export class Memory
             case RomType.MBC3RAMBATTERY:
             case RomType.MBC3TIMERBATTERY:
             case RomType.MBC3TIMERRAMBATTERY:
-                console.log(`ROMTYPE = ${romType}`);
                 this._controller = new MBC3(this);
                 break;
             
@@ -110,8 +145,63 @@ export class Memory
         return true;
     }
 
+    public readVideoRam(position: number, bank: number): number {
+        if (!this._biosEnabled && !this._cpu.gbcMode) {
+            return this._vram[0][position - 0x8000];
+        }
+
+        return this._vram[bank][position - 0x8000];
+    }
+
+    public readWorkRam(position: number, bank: number): number {
+        switch (position & 0xF000) {
+            default:
+            case 0xC000:
+                return this._wram[0][position - 0xC000];
+            
+            case 0xD000:
+                if (this._cpu.gbcMode) {
+                    return this._wram[bank][position - 0xD000];
+                } else {
+                    return this._wram[1][position - 0xD000];
+                }
+        }
+    }
+
+    public writeVideoRam(position: number, bank: number, data: number): void {
+        if (!this._biosEnabled && !this._cpu.gbcMode) {
+            this._vram[0][position - 0x8000] = data & 0xFF;
+            return;
+        }
+
+        this._vram[bank][position - 0x8000] = data & 0xFF;
+    }
+
+    public writeWorkRam(position: number, bank: number, data: number): void {
+        switch (position & 0xF000) {
+            default:
+            case 0xC000:
+                this._wram[0][position - 0xC000] = data & 0xFF;
+                break;
+
+            case 0xD000:
+                if (this._cpu.gbcMode) {
+                    this._wram[bank][position - 0xD000] = data & 0xFF;
+                } else {
+                    this._wram[1][position - 0xD000] = data & 0xFF;
+                }
+                break;
+        }
+    }
+
     public read8(position: number): number
     {
+        if (position < this._bios.length && this._biosEnabled) {
+            if (position < 0x100 || position >= 0x200) {
+                return this._bios[position];
+            }
+        }
+        
         if (this._registers[position] !== undefined) {
             return this._registers[position].read();
         }
@@ -119,11 +209,13 @@ export class Memory
         switch (position & 0xF000) {
             case 0x8000:
             case 0x9000:
-                return this._vram[position - 0x8000];
+                return this.readVideoRam(position, this._vramBank);
             
             case 0xC000:
+                return this.readWorkRam(position, 1);
+            
             case 0xD000:
-                return this._wram[position - 0xC000];
+                return this.readWorkRam(position, this._wramBank);
             
             case 0xF000:
                 if (position >= 0xFF80 && position <= 0xFFFE) {
@@ -139,28 +231,27 @@ export class Memory
 
     public write8(position: number, data: number): void
     {
+        if (position < this._bios.length && this._biosEnabled) {
+            if (position < 0x100 || position >= 0x200) {
+                this._bios[position] = data & 0xFF;
+                return;
+            }
+        }
+
         if (this._registers[position] !== undefined) {
             this._registers[position].write(data);
             return;
         }
 
-        if (position >= 0xFF00 && position < 0xFF80) {
-            console.log("MISSED REGISTER WRITE: ", position.toString(16));
-        }
-
-        // if (position >= 0xC02A && position <= 0xC02D) {
-        //     console.log("ADDR: ", position, data);
-        // }
-
         switch (position & 0xF000) {
             case 0x8000:
             case 0x9000:
-                this._vram[position - 0x8000] = data & 0xFF;
+                this.writeVideoRam(position, this._vramBank, data);
                 break;
 
             case 0xC000:
             case 0xD000:
-                this._wram[position - 0xC000] = data & 0xFF;
+                this.writeWorkRam(position, this._wramBank, data);
                 break;
 
             case 0xF000:
@@ -179,8 +270,10 @@ export class Memory
 
     public readInternal8(position: number): number
     {
-        if (position <= 0xFF && this._biosEnabled) {
-            return this._bios[position];
+        if (position < this._bios.length && this._biosEnabled) {
+            if (position < 0x100 || position >= 0x200) {
+                return this._bios[position];
+            }
         }
 
         return this._rom[position];
@@ -188,9 +281,11 @@ export class Memory
 
     public writeInternal8(position: number, data: number): void
     {
-        if (position <= 0xFF && this._biosEnabled) {
-            this._bios[position] = data & 0xFF;
-            return;
+        if (position < this._bios.length && this._biosEnabled) {
+            if (position < 0x100 || position >= 0x200) {
+                this._bios[position] = data & 0xFF;
+                return;
+            }
         }
 
         this._rom[position] = data & 0xFF;
@@ -219,23 +314,17 @@ export class Memory
 
     public saveRam(): void
     {
-        let identifier = this._cpu.romName.trim() + this._cpu.romHeaderChecksum + this._cpu.romGlobalChecksum;
-        identifier = identifier.replace(/\s/g, "");
-
-        localStorage.setItem(identifier, JSON.stringify(this._ram));
+        Memory.save(this, this._cpu.saveIdentifier, JSON.stringify(this._ram));
     }
 
     public loadRam(): void
     {
-        let identifier = this._cpu.romName.trim() + this._cpu.romHeaderChecksum + this._cpu.romGlobalChecksum;
-        identifier = identifier.replace(/\s/g, "");
-
-        const data = localStorage.getItem(identifier);
+        const data = Memory.load(this, this._cpu.saveIdentifier);
 
         if (!data) {
             return;
         }
-        
+
         this._ram = JSON.parse(data);
     }
 }

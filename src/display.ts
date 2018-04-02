@@ -1,5 +1,4 @@
 import { CPU, SpecialRegister, Interrupt } from "./cpu";
-const document = require("./browser.js");
 
 const GameboyColorPalette = [
     0xEB, 0xC4, 0x60, 0x00
@@ -17,7 +16,18 @@ enum DisplayRegister {
     OBP0,
     OBP1,
     WY,
-    WX
+    WX,
+
+    //GBC
+    BCPS,
+    BCPD,
+    OCPS,
+    OCPD,
+    HDMA1,
+    HDMA2,
+    HDMA3,
+    HDMA4,
+    HDMA5
 }
 
 enum DisplayMode {
@@ -25,6 +35,16 @@ enum DisplayMode {
     VBlank,
     ReadingOAM,
     ReadingOAMVRAM
+}
+
+interface Color {
+    red: number;
+    green: number;
+    blue: number;
+}
+
+interface ColorPalette {
+    color: Color[];
 }
 
 export class Display {
@@ -36,19 +56,58 @@ export class Display {
     private _backgroundTilemap: number;
     private _windowTilemap: number;
     private _activeTileset: number;
-    private _framebuffer: Uint8ClampedArray;
+    public _framebuffer: Uint8ClampedArray;
+    private _framebufferNumbers: Uint8ClampedArray;
+    private _priorityBuffer: boolean[];
     private _cycles: number;
     private _cyclesExtra: number;
     private _vblank: number;
     private _scanlineTransferred: boolean;
 
+    private _backgroundPalette: ColorPalette[];
+    private _spritePalette: ColorPalette[];
+    private _gbcMode: boolean;
+
+    private _hdmaSource: number;
+    private _hdmaTarget: number;
+    private _hdmaMode: number;
+    private _hdmaStatus: number;
+
+    public static setupWindow: (display: Display) => void;
+    public static render: (display: Display) => void;
+
     constructor(cpu: CPU) {
         this._cpu = cpu;
-        this._registers = new Uint8Array(0x0C);
+        this._registers = new Uint8Array(DisplayRegister.HDMA5 + 1);
         this._cycles = 0;
         this._cyclesExtra = 0;
         this._vblank = 0;
         this._scanlineTransferred = false;
+        this._gbcMode = false;
+
+        this._backgroundPalette = [];
+        this._spritePalette = [];
+        this._framebufferNumbers = new Uint8ClampedArray(160 * 144);
+
+        for (let i = 0; i <= 0x07; i++) {
+            this._backgroundPalette.push({
+                color: [
+                    { red: 0x1F, green: 0x1F, blue: 0x1F },
+                    { red: 0x1F, green: 0x1F, blue: 0x1F },
+                    { red: 0x1F, green: 0x1F, blue: 0x1F },
+                    { red: 0x1F, green: 0x1F, blue: 0x1F }
+                ]
+            });
+
+            this._spritePalette.push({
+                color: [
+                    { red: 0x1F, green: 0x1F, blue: 0x1F },
+                    { red: 0x1F, green: 0x1F, blue: 0x1F },
+                    { red: 0x1F, green: 0x1F, blue: 0x1F },
+                    { red: 0x1F, green: 0x1F, blue: 0x1F }
+                ]
+            });
+        }
 
         this._cpu.MMU.addRegister(0xFF40, this._readRegister.bind(this, DisplayRegister.LCDC), this._writeRegister.bind(this, DisplayRegister.LCDC));
         this._cpu.MMU.addRegister(0xFF41, this._readRegister.bind(this, DisplayRegister.STAT), this._writeRegister.bind(this, DisplayRegister.STAT));
@@ -63,19 +122,18 @@ export class Display {
         this._cpu.MMU.addRegister(0xFF4A, this._readRegister.bind(this, DisplayRegister.WY), this._writeRegister.bind(this, DisplayRegister.WY));
         this._cpu.MMU.addRegister(0xFF4B, this._readRegister.bind(this, DisplayRegister.WX), this._writeRegister.bind(this, DisplayRegister.WX));
 
-        const tmp = document.createElement("canvas");
-        tmp.style.width = "160px";
-        tmp.style.height = "144px";
-        tmp.width = 160;
-        tmp.height = 144;
-        this._context = tmp.getContext("2d");
-        this._context.fillStyle = "#dddddd";
-        this._context.fillRect(0, 0, 160, 144);
-        this._context.imageSmoothingEnabled = false;
-        this._data = this._context.createImageData(160, 144);
-        this._framebuffer = this._data.data;
+        //GBC
+        this._cpu.MMU.addRegister(0xFF51, this._readRegister.bind(this, DisplayRegister.HDMA1), this._writeRegister.bind(this, DisplayRegister.HDMA1));
+        this._cpu.MMU.addRegister(0xFF52, this._readRegister.bind(this, DisplayRegister.HDMA2), this._writeRegister.bind(this, DisplayRegister.HDMA2));
+        this._cpu.MMU.addRegister(0xFF53, this._readRegister.bind(this, DisplayRegister.HDMA3), this._writeRegister.bind(this, DisplayRegister.HDMA3));
+        this._cpu.MMU.addRegister(0xFF54, this._readRegister.bind(this, DisplayRegister.HDMA4), this._writeRegister.bind(this, DisplayRegister.HDMA4));
+        this._cpu.MMU.addRegister(0xFF55, this._readRegister.bind(this, DisplayRegister.HDMA5), this._writeRegister.bind(this, DisplayRegister.HDMA5));
+        this._cpu.MMU.addRegister(0xFF68, this._readRegister.bind(this, DisplayRegister.BCPS), this._writeRegister.bind(this, DisplayRegister.BCPS));
+        this._cpu.MMU.addRegister(0xFF69, this._readRegister.bind(this, DisplayRegister.BCPD), this._writeRegister.bind(this, DisplayRegister.BCPD));
+        this._cpu.MMU.addRegister(0xFF6A, this._readRegister.bind(this, DisplayRegister.OCPS), this._writeRegister.bind(this, DisplayRegister.OCPS));
+        this._cpu.MMU.addRegister(0xFF6B, this._readRegister.bind(this, DisplayRegister.OCPD), this._writeRegister.bind(this, DisplayRegister.OCPD));
 
-        // this._framebuffer = new Uint8ClampedArray(160 * 144 * 4);
+        Display.setupWindow(this);
 
         for (let i = 0; i < (160 * 144 * 4); i += 4) {
             this._framebuffer[i + 0] = 235;
@@ -84,6 +142,8 @@ export class Display {
             this._framebuffer[i + 3] = 255;
         }
 
+        this._priorityBuffer = Array(160 * 144).fill(false);
+
         this.BGP = 0xFC;
         this.SCX = 0;
         this.SCY = 0;
@@ -91,7 +151,44 @@ export class Display {
         this.WY = 0;
         this.LY = 0x91;
 
-        document.getElementById("emulator").appendChild(tmp);
+        this._registers[DisplayRegister.BCPD] = 0;
+        this._registers[DisplayRegister.BCPS] = 0;
+        this._registers[DisplayRegister.OCPD] = 0;
+        this._registers[DisplayRegister.OCPS] = 0;
+        this._registers[DisplayRegister.HDMA1] = 0;
+        this._registers[DisplayRegister.HDMA2] = 0;
+        this._registers[DisplayRegister.HDMA3] = 0;
+        this._registers[DisplayRegister.HDMA4] = 0;
+        this._registers[DisplayRegister.HDMA5] = 1 << 7;
+    }
+
+    public performHDMA() {
+        for (let i = 0; i < 0x10; i++) {
+            this._cpu.MMU.write8(this._hdmaTarget + i, this._cpu.MMU.read8(this._hdmaSource + i));
+        }
+
+        this._hdmaTarget += 0x10;
+        this._hdmaSource += 0x10;
+
+        if (this._hdmaTarget == 0xA000) {
+            this._hdmaTarget = 0x8000;
+        }
+
+        if (this.hdmaLength === 0) {
+            this.hdmaInProgress = false;
+        }
+
+        this.hdmaLength--;
+        this._hdmaSource &= 0xFFF0;
+
+        if (this._hdmaSource == 0x8000) {
+            this._hdmaSource = 0xA000;
+        }
+
+        this._registers[DisplayRegister.HDMA1] = this._hdmaSource >> 8;
+        this._registers[DisplayRegister.HDMA2] = this._hdmaSource & 0xF0;
+        this._registers[DisplayRegister.HDMA3] = this._hdmaTarget >> 8;
+        this._registers[DisplayRegister.HDMA4] = this._hdmaTarget & 0xF0;
     }
 
     public tick(delta: number) {
@@ -113,6 +210,10 @@ export class Display {
         switch (this.mode) {
             case DisplayMode.HBlank:
                 if (this._cycles >= 204) {
+                    if (this.hdmaInProgress) {
+                        this.performHDMA();
+                    }
+                    
                     this._cycles -= 204;
                     this.LY++;
 
@@ -184,6 +285,50 @@ export class Display {
         }
     }
 
+    private setColorPaletteData(data: number, background: boolean): void {
+        this._gbcMode = true;
+
+        let ps = this._registers[background ? DisplayRegister.BCPS : DisplayRegister.OCPS];
+        const increment = (ps & 0x80) ? true : false;
+        const hl = (ps & 0x1) != 0;
+        const index = (ps >> 1) & 0x03;
+        const pal = (ps >> 3) & 0x07;
+
+        if (hl) {
+            const blue = (data >> 2) & 0x1F;
+            const halfGreen = (data & 0x03) << 3;
+
+            if (background) {
+                this._backgroundPalette[pal].color[index].blue = blue;
+                this._backgroundPalette[pal].color[index].green =
+                    (this._backgroundPalette[pal].color[index].green & 0x07) | halfGreen;
+            } else {
+                this._spritePalette[pal].color[index].blue = blue;
+                this._spritePalette[pal].color[index].green =
+                    (this._spritePalette[pal].color[index].green & 0x07) | halfGreen;
+            }
+        } else {
+            const halfGreen = (data >> 5) & 0x07;
+            const red = data & 0x1F;
+
+            if (background) {
+                this._backgroundPalette[pal].color[index].red = red;
+                this._backgroundPalette[pal].color[index].green =
+                    (this._backgroundPalette[pal].color[index].green & 0x18) | halfGreen;
+            } else {
+                this._spritePalette[pal].color[index].red = red;
+                this._spritePalette[pal].color[index].green =
+                    (this._spritePalette[pal].color[index].green & 0x18) | halfGreen;
+            }
+        }
+
+        if (increment) {
+            ps = (ps & 0x80) | ((ps + 1) & 0x3F);
+
+            this._registers[background ? DisplayRegister.BCPS : DisplayRegister.OCPS] = ps;
+        }
+    }
+
     private _renderScanline(): void {
         this._renderBackground();
         this._renderWindow();
@@ -211,9 +356,11 @@ export class Display {
 
             const flags = this._cpu.MMU.read8(addr + 3);
 
+            const vramBank = this.gbcMode ? ((flags & (1 << 3)) === 0 ? 0 : 1) : 0;
             const flipX = flags & (1 << 5) ? true : false;
             const flipY = flags & (1 << 6) ? true : false;
 
+            const colorPalette = flags & 0x07;
             const palette = flags & (1 << 4) ? this._registers[DisplayRegister.OBP1] : this._registers[DisplayRegister.OBP0];
 
             if (this.LY < y || this.LY >= y + height) {
@@ -223,15 +370,19 @@ export class Display {
             let spriteY = this.LY - y;
 
             if (flipY) {
-                spriteY = height - spriteY;
+                spriteY = height - spriteY - 1;
             }
 
             for (let spriteX = 0; spriteX < width; spriteX++) {
                 const pixelX = x + spriteX;
                 const tileAddr = tileBase + tile * 16 + (spriteY * 2);
 
-                const byte1 = this._cpu.MMU.read8(tileAddr);
-                const byte2 = this._cpu.MMU.read8(tileAddr + 1);
+                if (pixelX < 0 || pixelX >= 160) {
+                    continue;
+                }
+                
+                const byte1 = this._cpu.MMU.readVideoRam(tileAddr, vramBank);
+                const byte2 = this._cpu.MMU.readVideoRam(tileAddr + 1, vramBank);
 
                 let bit = 7 - spriteX;
 
@@ -240,23 +391,30 @@ export class Display {
                 }
 
                 const colorNum = (this._bitGet(byte2, bit) << 1) | (this._bitGet(byte1, bit));
-                const color = this._getColor(palette, colorNum, true);
+
+                let color: Color = null;
+                if (!this.gbcMode) {
+                    color = this._getColor(palette, colorNum, true);
+                } else {
+                    color = this._getColorGBC(colorPalette, colorNum, false);
+                }    
 
                 if (color === null) {
                     continue;
                 }
 
-                const index = ((this.LY * 160) + pixelX) * 4;
+                const baseIndex = (this.LY * 160) + pixelX;
+                const index = baseIndex * 4;
 
-                if ((flags & (1 << 7)) !== 0) {
-                    if (this._framebuffer[index + 0] !== GameboyColorPalette[0]) {
+                if ((flags & (1 << 7)) !== 0 || (this.gbcMode && this._priorityBuffer[(this.LY * 160) + pixelX])) {
+                    if (this._framebufferNumbers[baseIndex] !== 0) {
                         continue;
                     }
                 }
 
-                this._framebuffer[index + 0] = color;
-                this._framebuffer[index + 1] = color;
-                this._framebuffer[index + 2] = color;
+                this._framebuffer[index + 0] = color.red;
+                this._framebuffer[index + 1] = color.green;
+                this._framebuffer[index + 2] = color.blue;
                 this._framebuffer[index + 3] = 255;
             }
         }
@@ -288,6 +446,11 @@ export class Display {
         let tx = -1;
         let byte1 = 0;
         let byte2 = 0;
+        let tileFlipX = false;
+        let tileFlipY = false;
+        let tilePriority = false;
+        let tileBank = 0;
+        let tilePalette = 0;
 
         for (let x = 0; x < 160; x++) {
             if ((wx + x) < 0 || (wx + x) >= 160) {
@@ -297,7 +460,17 @@ export class Display {
             const tileX = Math.floor(x / 8) % 32;
 
             if (tx !== tileX) {
-                let tileNumber = this._cpu.MMU.read8(base + (tileY * 32) + tileX);
+                let tileMapAddr = base + (tileY * 32) + tileX;
+                let tileNumber = this._cpu.MMU.readVideoRam(tileMapAddr, 0);
+
+                if (this.gbcMode) {
+                    const tileAttribute = this._cpu.MMU.readVideoRam(tileMapAddr, 1);
+                    tilePalette = tileAttribute & 0x07;
+                    tileBank = (tileAttribute >> 3) & 0x01;
+                    tileFlipX = ((tileAttribute >> 5) & 0x01) === 1;
+                    tileFlipY = ((tileAttribute >> 6) & 0x01) === 1;
+                    tilePriority = ((tileAttribute >> 7) & 0x01) === 1;
+                }
 
                 // Read tileValue as signed
                 if (!this._activeTileset) {
@@ -305,10 +478,11 @@ export class Display {
                     tileNumber = (tileNumber ^ msb_mask) - msb_mask;
                 }
 
-                const tileAddr = tileBase + tileNumber * 0x10 + (tileYOffset * 2);
+                const offset = tileFlipY ? 7 - tileYOffset : tileYOffset;
+                const tileAddr = tileBase + tileNumber * 0x10 + (offset * 2);
 
-                byte1 = this._cpu.MMU.read8(tileAddr);
-                byte2 = this._cpu.MMU.read8(tileAddr + 1);
+                byte1 = this._cpu.MMU.readVideoRam(tileAddr, tileBank);
+                byte2 = this._cpu.MMU.readVideoRam(tileAddr + 1, tileBank);
 
                 tx = tileX;
             }
@@ -316,18 +490,28 @@ export class Display {
             const bit = 7 - (x % 8);
 
             const colorNum = (this._bitGet(byte2, bit) << 1) | (this._bitGet(byte1, bit));
-            const color = this._getColor(this.BGP, colorNum, false);
-            const index = ((this.LY * 160) + wx + x) * 4;
+            const baseIndex = (this.LY * 160) + wx + x;
+            const index = baseIndex * 4;
 
-            this._framebuffer[index + 0] = color;
-            this._framebuffer[index + 1] = color;
-            this._framebuffer[index + 2] = color;
+            let color: Color = null;
+            if (!this.gbcMode) {
+                color = this._getColor(this.BGP, colorNum, false);
+            } else {
+                this._priorityBuffer[(this.LY * 160) + wx + x] = tilePriority;
+                color = this._getColorGBC(tilePalette, colorNum, true);
+            }
+
+            this._framebuffer[index + 0] = color.red;
+            this._framebuffer[index + 1] = color.green;
+            this._framebuffer[index + 2] = color.blue;
             this._framebuffer[index + 3] = 255;
+
+            this._framebufferNumbers[baseIndex] = colorNum;
         }
     }
 
     private _renderBackground(): void {
-        if ((this.LCDC & (1 << 0)) === 0) {
+        if ((this.LCDC & (1 << 0)) === 0 && !this.gbcMode) {
             return;
         }
 
@@ -340,12 +524,33 @@ export class Display {
         let tx = -1;
         let byte1 = 0;
         let byte2 = 0;
+        let tileFlipX = false;
+        let tileFlipY = false;
+        let tilePriority = false;
+        let tileBank = 0;
+        let tilePalette = 0;
 
         for (let x = 0; x < 160; x++) {
             const tileX = Math.floor((this.SCX + x) / 8) % 32;
 
             if (tx !== tileX) {
-                let tileNumber = this._cpu.MMU.read8(base + (tileY * 32) + tileX);
+                let tileMapAddr = base + (tileY * 32) + tileX;
+                let tileNumber = this._cpu.MMU.readVideoRam(tileMapAddr, 0);
+
+                if (this.gbcMode) {
+                    const tileAttribute = this._cpu.MMU.readVideoRam(tileMapAddr, 1);
+                    tilePalette = tileAttribute & 0x07;
+                    tileBank = (tileAttribute & (1 << 3)) ? 1 : 0;
+                    tileFlipX = ((tileAttribute >> 5) & 0x01) === 1;
+                    tileFlipY = ((tileAttribute >> 6) & 0x01) === 1;
+                    tilePriority = ((tileAttribute >> 7) & 0x01) === 1;
+                } else {
+                    tileFlipX = false;
+                    tileFlipY = false;
+                    tilePriority = false;
+                    tilePalette = 0;
+                    tileBank = 0;
+                }
 
                 // Read tileValue as signed
                 if (!this._activeTileset) {
@@ -353,24 +558,36 @@ export class Display {
                     tileNumber = (tileNumber ^ msb_mask) - msb_mask;
                 }
 
-                const tileAddr = tileBase + tileNumber * 0x10 + (tileYOffset * 2);
+                const offset = tileFlipY ? 7 - tileYOffset : tileYOffset;
+                const tileAddr = tileBase + tileNumber * 0x10 + (offset * 2);
 
-                byte1 = this._cpu.MMU.read8(tileAddr);
-                byte2 = this._cpu.MMU.read8(tileAddr + 1);
+                byte1 = this._cpu.MMU.readVideoRam(tileAddr, tileBank);
+                byte2 = this._cpu.MMU.readVideoRam(tileAddr + 1, tileBank);
 
                 tx = tileX;
             }
 
-            const bit = 7 - ((this.SCX + x) % 8);
+            const tmp_x = ((this.SCX + x) % 8);
+            const bit = tileFlipX ? 7 - (7 - tmp_x) : 7 - tmp_x;
 
             const colorNum = (this._bitGet(byte2, bit) << 1) | (this._bitGet(byte1, bit));
-            const color = this._getColor(this.BGP, colorNum, false);
-            const index = ((this.LY * 160) + x) * 4;
+            const baseIndex = (this.LY * 160) + x;
+            const index = baseIndex * 4;
 
-            this._framebuffer[index + 0] = color;
-            this._framebuffer[index + 1] = color;
-            this._framebuffer[index + 2] = color;
+            let color: Color = null;
+            if (!this.gbcMode) {
+                color = this._getColor(this.BGP, colorNum, false);
+            } else {
+                this._priorityBuffer[(this.LY * 160) + x] = tilePriority;
+                color = this._getColorGBC(tilePalette, colorNum, true);
+            }
+
+            this._framebuffer[index + 0] = color.red;
+            this._framebuffer[index + 1] = color.green;
+            this._framebuffer[index + 2] = color.blue;
             this._framebuffer[index + 3] = 255;
+
+            this._framebufferNumbers[baseIndex] = colorNum;
         }
     }
 
@@ -378,7 +595,7 @@ export class Display {
         return input & (1 << bit) ? 1 : 0;
     }
 
-    private _getColor(palette: number, bit: number, transparent: boolean): number | null {
+    private _getColor(palette: number, bit: number, transparent: boolean): Color | null {
         const hi = ((bit << 1) + 1);
         const lo = (bit << 1);
         const color = (this._bitGet(palette, hi) << 1) | (this._bitGet(palette, lo));
@@ -387,11 +604,35 @@ export class Display {
             return null;
         }
 
-        return GameboyColorPalette[color];
+        return {
+            red: GameboyColorPalette[color],
+            green: GameboyColorPalette[color],
+            blue: GameboyColorPalette[color]
+        };
+    }
+
+    private _getColorGBC(palette: number, bit: number, background: boolean): Color | null {
+        if (bit === 0 && !background) {
+            return null;
+        }
+
+        if (background) {
+            return {
+                red: Math.round((this._backgroundPalette[palette].color[bit].red / 31) * GameboyColorPalette[0]),
+                green: Math.round((this._backgroundPalette[palette].color[bit].green / 31) * GameboyColorPalette[0]),
+                blue: Math.round((this._backgroundPalette[palette].color[bit].blue / 31) * GameboyColorPalette[0])
+            };
+        }
+
+        return {
+            red: Math.round((this._spritePalette[palette].color[bit].red / 31) * GameboyColorPalette[0]),
+            green: Math.round((this._spritePalette[palette].color[bit].green / 31) * GameboyColorPalette[0]),
+            blue: Math.round((this._spritePalette[palette].color[bit].blue / 31) * GameboyColorPalette[0])
+        };
     }
 
     private _render(): void {
-        this._context.putImageData(this._data, 0, 0);
+        Display.render(this);
     }
 
     private _readRegister(register: DisplayRegister): number {
@@ -420,6 +661,31 @@ export class Display {
                     this._render();
                 }    
                 break;
+
+            case DisplayRegister.BCPD:
+                this.setColorPaletteData(value, true);
+                break;
+
+            case DisplayRegister.OCPD:
+                this.setColorPaletteData(value, false);
+                break;
+            case DisplayRegister.HDMA5:
+                this._registers[register] = value;
+
+                if (this.hdmaInProgress) {
+                    if ((value & (1 << 7)) === 0 && this._hdmaMode === 1) {
+                        this.hdmaInProgress = false;
+                    }
+                } else {
+                    this._hdmaSource = (this._registers[DisplayRegister.HDMA1] << 8) | (this._registers[DisplayRegister.HDMA2] & 0xF0);
+                    this._hdmaTarget = ((this._registers[DisplayRegister.HDMA3] & 0x1F) << 8) | (this._registers[DisplayRegister.HDMA4] & 0xF0);
+                    this._hdmaTarget |= 0x8000;
+
+                    this._hdmaMode = (value & 0x80) === 0 ? 0 : 1;
+                    this.hdmaInProgress = true;
+                    this.hdmaLength = value & 0b01111111;
+                }
+                return;
         }
 
         this._registers[register] = value;
@@ -503,5 +769,29 @@ export class Display {
 
     public set mode(val: number) {
         this._registers[DisplayRegister.STAT] = ((this._registers[DisplayRegister.STAT] & ~0x03) | val);
+    }
+
+    public get gbcMode(): boolean {
+        return this._cpu._inBootstrap ? this._gbcMode : this._cpu.gbcMode;
+    }
+
+    public get hdmaLength(): number {
+        return this._hdmaStatus & 0b01111111;
+    }
+
+    public set hdmaLength(val: number) {
+        this._hdmaStatus = (this._hdmaStatus & (1 << 7)) | (val & 0b01111111);
+    }
+
+    public get hdmaInProgress(): boolean {
+        return (this._hdmaStatus & (1 << 7)) ? false : true;
+    }
+
+    public set hdmaInProgress(val: boolean) {
+        if (!val) {
+            this._hdmaStatus |= 1 << 7;
+        } else {
+            this._hdmaStatus &= ~(1 << 7);
+        }
     }
 }
