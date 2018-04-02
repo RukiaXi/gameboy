@@ -1,7 +1,11 @@
 /dist/*.js
 /dist/bios/*.bin
 /dist/roms/*.gb
+/dist/assets/css/*.css
+/dist/assets/css/*.map
 /node_modules
 /docs
 dist/scripts/main.js
 trace.txt
+
+\.sass-cache/
